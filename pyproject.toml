@@ -1,8 +1,30 @@
-# To get the tests to pass when the repo is first copied
-
 [project]
-name = "datasette-plugin-template-repository"
+name = "datasette-embeddings"
 version = "0.1"
+description = "Store and query embedding vectors in Datasette tables"
+readme = "README.md"
+authors = [{name = "Datasette"}]
+license = {text = "Apache-2.0"}
+classifiers=[
+    "Framework :: Datasette",
+    "License :: OSI Approved :: Apache Software License"
+]
+requires-python = ">=3.8"
+dependencies = [
+    "datasette"
+]
+
+[project.urls]
+Homepage = "https://github.com/datasette/datasette-embeddings"
+Changelog = "https://github.com/datasette/datasette-embeddings/releases"
+Issues = "https://github.com/datasette/datasette-embeddings/issues"
+CI = "https://github.com/datasette/datasette-embeddings/actions"
+
+[project.entry-points.datasette]
+embeddings = "datasette_embeddings"
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "pytest-asyncio"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"

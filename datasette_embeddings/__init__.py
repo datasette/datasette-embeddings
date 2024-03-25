@@ -1,14 +1,123 @@
-from datasette import hookimpl
+from datasette import hookimpl, Response
 from datasette_enrichments import Enrichment
 from datasette.database import Database
 import httpx
-from typing import List, Optional
-from wtforms import Form, SelectField, StringField, PasswordField, TextAreaField
-from wtforms.validators import DataRequired
+import json
 import secrets
 import sqlite_utils
 import struct
-import json
+from typing import List, Optional
+import urllib.parse
+from wtforms import Form, SelectField, StringField, PasswordField, TextAreaField
+from wtforms.validators import DataRequired
+
+
+MODEL_NAMES = (
+    "text-embedding-3-large-256",
+    "text-embedding-3-small-512",
+    "text-embedding-3-large-1024",
+    "text-embedding-3-small",
+    "text-embedding-3-large",
+)
+DEFAULT_MODEL = "text-embedding-3-small-512"
+
+
+async def embedding_column_for_table(datasette, database, table):
+    db = datasette.get_database(database)
+    columns = await db.table_columns(table)
+    emb_columns = [column for column in columns if column.startswith("emb_")]
+    if not emb_columns:
+        return False
+    column = emb_columns[0]
+
+    # Figure out which model it is
+    model_name = column.replace("emb_", "").replace("_", "-")
+    if model_name not in MODEL_NAMES:
+        return False, False
+
+    return column, model_name
+
+
+async def embeddings_semantic_search(datasette, request):
+    table = request.url_vars["table"]
+    database = request.url_vars["database"]
+
+    embedding_column, model_name = await embedding_column_for_table(
+        datasette, database, table
+    )
+    if not embedding_column:
+        datasette.add_message(
+            request,
+            "Table does not have an embedding column",
+            type=datasette.ERROR,
+        )
+
+    if request.method == "POST":
+        form = await request.post_vars()
+        q = (form.get("q") or "").strip()
+        if not q:
+            datasette.add_message(
+                request, "Search query is required", type=datasette.ERROR
+            )
+            return Response.redirect(request.path)
+
+        # Embed it
+        api_key = resolve_api_key(datasette, {})
+        vector = await EmbeddingsEnrichment.calculate_embedding(api_key, q, model_name)
+        blob = EmbeddingsEnrichment.encode_embedding(vector)
+
+        # Redirect to the SQL query against the table
+        sql = """
+        select
+          *,
+          vector_similarity({column}, unhex(:vector)) as _similarity
+        from "{table}"
+        order by _similarity desc
+        """.format(
+            column=embedding_column, table=table
+        )
+        return Response.redirect(
+            datasette.urls.database(database)
+            + "?"
+            + urllib.parse.urlencode(
+                {"sql": sql, "vector": blob.hex().upper(), "_hide_sql": 1}
+            )
+        )
+
+    return Response.html(
+        await datasette.render_template(
+            "embeddings_semantic_search.html", request=request
+        )
+    )
+
+
+@hookimpl
+def table_actions(datasette, database, table):
+    async def inner():
+        embedding_column, _ = await embedding_column_for_table(
+            datasette, database, table
+        )
+        if embedding_column:
+            return [
+                {
+                    "href": datasette.urls.table(database, table)
+                    + "/-/semantic-search",
+                    "label": "Semantic search against this table",
+                    "description": "Find table rows similar in meaning to your query",
+                }
+            ]
+
+    return inner
+
+
+@hookimpl
+def register_routes():
+    return [
+        (
+            r"^/(?P<database>[^/]+)/(?P<table>[^/]+)/-/semantic-search$",
+            embeddings_semantic_search,
+        ),
+    ]
 
 
 @hookimpl
@@ -37,14 +146,8 @@ class EmbeddingsEnrichment(Enrichment):
         class ConfigForm(Form):
             model = SelectField(
                 "Model",
-                choices=[
-                    ("text-embedding-3-large-256", "text-embedding-3-large-256"),
-                    ("text-embedding-3-small-512", "text-embedding-3-small-512"),
-                    ("text-embedding-3-large-1024", "text-embedding-3-large-1024"),
-                    ("text-embedding-3-small", "text-embedding-3-small"),
-                    ("text-embedding-3-large", "text-embedding-3-large"),
-                ],
-                default="text-embedding-3-small-512",
+                choices=[(model_name, model_name) for model_name in MODEL_NAMES],
+                default=DEFAULT_MODEL,
             )
             template = TextAreaField(
                 "Template",
@@ -91,7 +194,8 @@ class EmbeddingsEnrichment(Enrichment):
 
         await db.execute_write_fn(add_column_if_not_exists)
 
-    async def calculate_embedding(self, api_key, text, model):
+    @classmethod
+    async def calculate_embedding(cls, api_key, text, model):
         # Add dimensions for models called things that end in -xxx digits
         body = {
             "input": text,
@@ -115,7 +219,8 @@ class EmbeddingsEnrichment(Enrichment):
             embedding = response.json()["data"][0]["embedding"]
             return embedding
 
-    def encode_embedding(self, embedding):
+    @classmethod
+    def encode_embedding(cls, embedding):
         return struct.pack("<" + "f" * len(embedding), *embedding)
 
     async def enrich_batch(

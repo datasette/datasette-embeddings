@@ -27,7 +27,7 @@ async def embedding_column_for_table(datasette, database, table):
     columns = await db.table_columns(table)
     emb_columns = [column for column in columns if column.startswith("emb_")]
     if not emb_columns:
-        return False
+        return False, False
     column = emb_columns[0]
 
     # Figure out which model it is

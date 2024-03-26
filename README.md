@@ -33,3 +33,9 @@ To run the tests:
 ```bash
 pytest
 ```
+The tests use captured examples of embedding APIs. The easiest way to re-generate these is to do the following:
+
+- `rm -rf tests/cassettes` to remove the previous recordings
+- `export OPENAPI_API_KEY='...'` to set an OpenAI API key
+- `pytest --record-mode once` to recreate the cassettes
+

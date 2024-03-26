@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Semantic search table{% endblock %}
+
+{% block content %}
+<h1>Semantic search table</h1>
+<form method="POST">
+  <p><label>Search
+    <input type="text" name="q">
+    <input type="hidden" name="csrftoken" value="{{ csrftoken() }}">
+  </p>
+  <p><input type="submit" value="Search"></p>
+</form>
+{% endblock %}

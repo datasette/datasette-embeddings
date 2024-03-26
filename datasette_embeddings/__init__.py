@@ -120,11 +120,18 @@ def prepare_connection(conn):
 
 @hookimpl
 def table_actions(datasette, database, table):
+    has_api_key = False
+    try:
+        resolve_api_key(datasette)
+        has_api_key = True
+    except ApiKeyError:
+        pass
+
     async def inner():
         embedding_column, _ = await embedding_column_for_table(
             datasette, database, table
         )
-        if embedding_column:
+        if embedding_column and has_api_key:
             return [
                 {
                     "href": datasette.urls.table(database, table)
@@ -282,7 +289,12 @@ class EmbeddingsEnrichment(Enrichment):
             )
 
 
-def resolve_api_key(datasette, config):
+class ApiKeyError(Exception):
+    pass
+
+
+def resolve_api_key(datasette, config=None):
+    config = config or {}
     plugin_config = datasette.plugin_config("datasette-embeddings") or {}
     api_key = plugin_config.get("api_key")
     if api_key:

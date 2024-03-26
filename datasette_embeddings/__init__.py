@@ -5,6 +5,7 @@ import httpx
 import json
 import secrets
 import sqlite_utils
+import sqlite3
 import struct
 from typing import List, Optional
 import urllib.parse
@@ -70,7 +71,7 @@ async def embeddings_semantic_search(datasette, request):
         sql = """
         select
           *,
-          vector_similarity({column}, unhex(:vector)) as _similarity
+          embeddings_cosine({column}, unhex(:vector)) as _similarity
         from "{table}"
         order by _similarity desc
         """.format(
@@ -89,6 +90,32 @@ async def embeddings_semantic_search(datasette, request):
             "embeddings_semantic_search.html", request=request
         )
     )
+
+
+def embeddings_cosine(binary_a, binary_b):
+    a = EmbeddingsEnrichment.decode_embedding(binary_a)
+    b = EmbeddingsEnrichment.decode_embedding(binary_b)
+    dot_product = sum(x * y for x, y in zip(a, b))
+    magnitude_a = sum(x * x for x in a) ** 0.5
+    magnitude_b = sum(x * x for x in b) ** 0.5
+    return dot_product / (magnitude_a * magnitude_b)
+
+
+def unhex(hex_string):
+    try:
+        return bytes.fromhex(hex_string)
+    except ValueError:
+        return None
+
+
+@hookimpl
+def prepare_connection(conn):
+    conn.create_function("embeddings_cosine", 2, embeddings_cosine)
+    # Check if unhex exists
+    try:
+        conn.execute("select unhex('AB')")
+    except sqlite3.OperationalError:
+        conn.create_function("unhex", 1, unhex)
 
 
 @hookimpl
@@ -223,6 +250,10 @@ class EmbeddingsEnrichment(Enrichment):
     def encode_embedding(cls, embedding):
         return struct.pack("<" + "f" * len(embedding), *embedding)
 
+    @classmethod
+    def decode_embedding(cls, binary):
+        return struct.unpack("<" + "f" * (len(binary) // 4), binary)
+
     async def enrich_batch(
         self,
         datasette: "Datasette",
@@ -233,22 +264,18 @@ class EmbeddingsEnrichment(Enrichment):
         config: dict,
         job_id: int,
     ) -> List[Optional[str]]:
-        print(rows)
         api_key = resolve_api_key(datasette, config)
         template = config["template"]
         model = config["model"]
         column_name = f"emb_{model.replace('-', '_')}"
         for row in rows:
-            print(row)
             text = template
             for key, value in row.items():
                 text = text.replace("{{ %s }}" % key, str(value or "")).replace(
                     "{{%s}}" % key, str(value or "")
                 )
             embedding = await self.calculate_embedding(api_key, text, model)
-            print("  ", embedding)
             encoded_embedding = self.encode_embedding(embedding)
-            print("  ", encoded_embedding)
             await db.execute_write(
                 f"UPDATE [{table}] SET [{column_name}] = ? WHERE { ' AND '.join([f'[{pk}] = ?' for pk in pks]) }",
                 [encoded_embedding] + [row[pk] for pk in pks],

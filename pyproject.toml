@@ -1,6 +1,6 @@
 [project]
 name = "datasette-embeddings"
-version = "0.1"
+version = "0.1a0"
 description = "Store and query embedding vectors in Datasette tables"
 readme = "README.md"
 authors = [{name = "Datasette"}]
@@ -27,7 +27,7 @@ CI = "https://github.com/datasette/datasette-embeddings/actions"
 embeddings = "datasette_embeddings"
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-asyncio", "pytest-recording"]
+test = ["pytest", "pytest-asyncio", "pytest-recording", "datasette-test"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"

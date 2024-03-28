@@ -33,4 +33,4 @@ test = ["pytest", "pytest-asyncio", "pytest-recording", "datasette-test"]
 asyncio_mode = "strict"
 
 [tool.setuptools.package-data]
-datasette_edit_schema = ["templates/*"]
+datasette_embeddings = ["templates/*"]

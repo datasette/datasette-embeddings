@@ -88,7 +88,10 @@ async def embeddings_semantic_search(datasette, request):
 
     return Response.html(
         await datasette.render_template(
-            "embeddings_semantic_search.html", request=request
+            "embeddings_semantic_search.html", {
+                "table": table,
+                "database": database,
+            }, request=request
         )
     )
 

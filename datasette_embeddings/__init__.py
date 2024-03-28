@@ -71,8 +71,9 @@ async def embeddings_semantic_search(datasette, request):
         sql = """
         select
           *,
-          embeddings_cosine({column}, unhex(:vector)) as _similarity
+          embeddings_cosine("{column}", unhex(:vector)) as _similarity
         from "{table}"
+        where "{column}" is not null
         order by _similarity desc
         """.format(
             column=embedding_column, table=table

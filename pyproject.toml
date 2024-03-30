@@ -1,6 +1,6 @@
 [project]
 name = "datasette-embeddings"
-version = "0.1a1"
+version = "0.1a2"
 description = "Store and query embedding vectors in Datasette tables"
 readme = "README.md"
 authors = [{name = "Datasette"}]

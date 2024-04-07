@@ -149,9 +149,13 @@ def table_actions(datasette, actor, database, table):
         return
 
     async def inner():
-        if await embedding_columns_for_table(
+        can_execute_sql = await datasette.permission_allowed(
+            actor, "execute-sql", database, default=True
+        )
+        columns_for_table = await embedding_columns_for_table(
             datasette, database, table
-        ) and await datasette.permission_allowed(actor, "execute-sql", database):
+        )
+        if columns_for_table and can_execute_sql:
             return [
                 {
                     "href": datasette.urls.table(database, table)

@@ -80,8 +80,9 @@ async def embeddings_semantic_search(datasette, request):
         )
 
         # Redirect to the SQL query against the table
-        sql = textwrap.dedent(
-            """
+        sql = (
+            textwrap.dedent(
+                """
         select
           "{table}".*,
           embeddings_cosine("_embeddings_{table}"."{column}", unhex(:vector)) as _similarity
@@ -90,7 +91,10 @@ async def embeddings_semantic_search(datasette, request):
         where "_embeddings_{table}"."{column}" is not null
         order by _similarity desc
         """
-        ).format(column=column_name, table=table, pk_join=pk_join)
+            )
+            .format(column=column_name, table=table, pk_join=pk_join)
+            .strip()
+        )
         return Response.redirect(
             datasette.urls.database(database)
             + "?"
@@ -139,18 +143,13 @@ def prepare_connection(conn):
 
 @hookimpl
 def table_actions(datasette, database, table):
-    has_api_key = False
     try:
         resolve_api_key(datasette)
-        has_api_key = True
     except ApiKeyError:
-        pass
+        return
 
     async def inner():
-        embedding_columns = await embedding_columns_for_table(
-            datasette, database, table
-        )
-        if embedding_columns and has_api_key:
+        if await embedding_columns_for_table(datasette, database, table):
             return [
                 {
                     "href": datasette.urls.table(database, table)

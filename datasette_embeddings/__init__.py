@@ -142,14 +142,16 @@ def prepare_connection(conn):
 
 
 @hookimpl
-def table_actions(datasette, database, table):
+def table_actions(datasette, actor, database, table):
     try:
         resolve_api_key(datasette)
     except ApiKeyError:
         return
 
     async def inner():
-        if await embedding_columns_for_table(datasette, database, table):
+        if await embedding_columns_for_table(
+            datasette, database, table
+        ) and await datasette.permission_allowed(actor, "execute-sql", database):
             return [
                 {
                     "href": datasette.urls.table(database, table)

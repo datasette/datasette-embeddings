@@ -1,9 +1,11 @@
-import asyncio
+from datasette import version
 from datasette_test import Datasette
+from packaging.version import parse
+from unittest.mock import ANY
+import asyncio
 import os
 import pytest
 import sqlite_utils
-from unittest.mock import ANY
 import urllib.parse
 
 
@@ -177,3 +179,41 @@ async def test_similarity_search(tmpdir, use_compound_pk, on_sql):
                 "_similarity": ANY,
             },
         ]
+
+
+@pytest.fixture
+def db_path(tmpdir):
+    path = str(tmpdir / "data.db")
+    db = sqlite_utils.Database(path)
+    with db.conn:
+        db["items"].insert({"id": 1, "name": "Cow"}, pk="id")
+        db["_embeddings_items"].insert(
+            {"id": 1, "emb_text_embedding_3_large_256": b"123"}, pk="id"
+        )
+    return path
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario", (None, "no_table", "no_api_key", "no_execute_sql"))
+@pytest.mark.skipif(
+    parse(version.__version__) < parse("1.0a13"),
+    reason="Uses config= from Datasette 1.0",
+)
+async def test_show_semantic_search_action_item(db_path, scenario):
+    plugin_config = {}
+    if scenario != "no_api_key":
+        plugin_config = {"datasette-embeddings": {"api_key": "sk-blah"}}
+    config = {}
+    if scenario == "no_execute_sql":
+        config["databases"] = {"data": {"allow_sql": False}}
+    datasette = Datasette([db_path], plugin_config=plugin_config, config=config)
+    if scenario == "no_table":
+        await datasette.get_database("data").execute_write(
+            "drop table _embeddings_items"
+        )
+
+    html = (await datasette.client.get("/data/items")).text
+    if scenario is None:
+        assert ">Semantic" in html
+    else:
+        assert ">Semantic" not in html

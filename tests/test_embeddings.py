@@ -94,9 +94,27 @@ async def test_enrichment(tmpdir):
 
 
 @pytest.mark.vcr(ignore_localhost=True)
+@pytest.mark.parametrize(
+    "use_compound_pk,on_sql",
+    (
+        (False, "items.id = _embeddings_items.id"),
+        (
+            True,
+            "items.category = _embeddings_items.category and items.id = _embeddings_items.id",
+        ),
+    ),
+)
 @pytest.mark.asyncio
-async def test_similarity_search(tmpdir):
+async def test_similarity_search(tmpdir, use_compound_pk, on_sql):
     datasette = await test_enrichment(tmpdir)
+    if use_compound_pk:
+        # Modify items and _embeddings_items to simulate a compound pk
+        db = sqlite_utils.Database(str(tmpdir / "data.db"))
+        for table in ("items", "_embeddings_items"):
+            db[table].add_column("category", str)
+            db.execute(f"update {table} set category = 'cat'")
+            db[table].transform(pk=("category", "id"))
+
     # Should have table actions
     table_html = (await datasette.client.get("/data/items")).text
     assert '><a href="/data/items/-/semantic-search">Semantic search' in table_html
@@ -116,7 +134,7 @@ async def test_similarity_search(tmpdir):
         '  "items".*,\n'
         '  embeddings_cosine("_embeddings_items"."emb_text_embedding_3_large_256", unhex(:vector)) as _similarity\n'
         'from "items" join "_embeddings_items"\n'
-        "on items.id = _embeddings_items.id\n"
+        f"on {on_sql}\n"
         'where "_embeddings_items"."emb_text_embedding_3_large_256" is not null\n'
         "order by _similarity desc"
     )
@@ -127,21 +145,46 @@ async def test_similarity_search(tmpdir):
         redirect.replace("/data?sql=", "/data.json?sql=")
     )
     assert response.status_code == 200
-    assert response.json() == {
-        "ok": True,
-        "rows": [
-            {
-                "id": 2,
-                "name": "Two",
-                "description": "Second item",
-                "_similarity": ANY,
-            },
-            {
-                "id": 1,
-                "name": "One",
-                "description": "First item",
-                "_similarity": ANY,
-            },
-        ],
-        "truncated": False,
-    }
+    import shutil
+
+    shutil.copy(str(tmpdir / "data.db"), "/tmp/data.db")
+    if use_compound_pk:
+        assert response.json() == {
+            "ok": True,
+            "rows": [
+                {
+                    "id": 2,
+                    "name": "Two",
+                    "description": "Second item",
+                    "category": "cat",
+                    "_similarity": ANY,
+                },
+                {
+                    "id": 1,
+                    "name": "One",
+                    "description": "First item",
+                    "category": "cat",
+                    "_similarity": ANY,
+                },
+            ],
+            "truncated": False,
+        }
+    else:
+        assert response.json() == {
+            "ok": True,
+            "rows": [
+                {
+                    "id": 2,
+                    "name": "Two",
+                    "description": "Second item",
+                    "_similarity": ANY,
+                },
+                {
+                    "id": 1,
+                    "name": "One",
+                    "description": "First item",
+                    "_similarity": ANY,
+                },
+            ],
+            "truncated": False,
+        }

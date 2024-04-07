@@ -142,49 +142,38 @@ async def test_similarity_search(tmpdir, use_compound_pk, on_sql):
     assert qs["_hide_sql"] == "1"
     # Now follow the JSON version of that redirect
     response = await datasette.client.get(
-        redirect.replace("/data?sql=", "/data.json?sql=")
+        redirect.replace("/data?sql=", "/data.json?sql=") + "&_shape=objects"
     )
     assert response.status_code == 200
-    import shutil
-
-    shutil.copy(str(tmpdir / "data.db"), "/tmp/data.db")
     if use_compound_pk:
-        assert response.json() == {
-            "ok": True,
-            "rows": [
-                {
-                    "id": 2,
-                    "name": "Two",
-                    "description": "Second item",
-                    "category": "cat",
-                    "_similarity": ANY,
-                },
-                {
-                    "id": 1,
-                    "name": "One",
-                    "description": "First item",
-                    "category": "cat",
-                    "_similarity": ANY,
-                },
-            ],
-            "truncated": False,
-        }
+        assert response.json()["rows"] == [
+            {
+                "id": 2,
+                "name": "Two",
+                "description": "Second item",
+                "category": "cat",
+                "_similarity": ANY,
+            },
+            {
+                "id": 1,
+                "name": "One",
+                "description": "First item",
+                "category": "cat",
+                "_similarity": ANY,
+            },
+        ]
     else:
-        assert response.json() == {
-            "ok": True,
-            "rows": [
-                {
-                    "id": 2,
-                    "name": "Two",
-                    "description": "Second item",
-                    "_similarity": ANY,
-                },
-                {
-                    "id": 1,
-                    "name": "One",
-                    "description": "First item",
-                    "_similarity": ANY,
-                },
-            ],
-            "truncated": False,
-        }
+        assert response.json()["rows"] == [
+            {
+                "id": 2,
+                "name": "Two",
+                "description": "Second item",
+                "_similarity": ANY,
+            },
+            {
+                "id": 1,
+                "name": "One",
+                "description": "First item",
+                "_similarity": ANY,
+            },
+        ]

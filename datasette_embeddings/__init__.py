@@ -2,12 +2,12 @@ from datasette import hookimpl, Response
 from datasette_enrichments import Enrichment
 from datasette.database import Database
 import httpx
-import json
 import secrets
 import sqlite_utils
 import sqlite3
 import struct
-from typing import List, Optional
+import textwrap
+from typing import List, Optional, Tuple
 import urllib.parse
 from wtforms import Form, SelectField, StringField, PasswordField, TextAreaField
 from wtforms.validators import DataRequired
@@ -23,33 +23,34 @@ MODEL_NAMES = (
 DEFAULT_MODEL = "text-embedding-3-small-512"
 
 
-async def embedding_column_for_table(datasette, database, table):
+async def embedding_columns_for_table(datasette, database, table) -> dict:
+    # Returns {column_name: embedding_model_name} or {}
+    shadow_table = f"_embeddings_{table}"
     db = datasette.get_database(database)
-    columns = await db.table_columns(table)
+    if not await db.table_exists(shadow_table):
+        return {}
+    columns = await db.table_columns(shadow_table)
     emb_columns = [column for column in columns if column.startswith("emb_")]
     if not emb_columns:
-        return False, False
-    column = emb_columns[0]
+        return {}
 
-    # Figure out which model it is
-    model_name = column.replace("emb_", "").replace("_", "-")
-    if model_name not in MODEL_NAMES:
-        return False, False
-
-    return column, model_name
+    # Return each column for which an embedding model exists
+    return {
+        column: column.replace("emb_", "").replace("_", "-")
+        for column in emb_columns
+        if column.replace("emb_", "").replace("_", "-") in MODEL_NAMES
+    }
 
 
 async def embeddings_semantic_search(datasette, request):
     table = request.url_vars["table"]
     database = request.url_vars["database"]
 
-    embedding_column, model_name = await embedding_column_for_table(
-        datasette, database, table
-    )
-    if not embedding_column:
+    embedding_columns = await embedding_columns_for_table(datasette, database, table)
+    if not embedding_columns:
         datasette.add_message(
             request,
-            "Table does not have an embedding column",
+            "Table does not have any stored embeddings",
             type=datasette.ERROR,
         )
 
@@ -62,22 +63,34 @@ async def embeddings_semantic_search(datasette, request):
             )
             return Response.redirect(request.path)
 
+        # Just use first model for the moment
+        column_name, model_name = next(iter(embedding_columns.items()))
+
         # Embed it
         api_key = resolve_api_key(datasette, {})
         vector = await EmbeddingsEnrichment.calculate_embedding(api_key, q, model_name)
         blob = EmbeddingsEnrichment.encode_embedding(vector)
 
-        # Redirect to the SQL query against the table
-        sql = """
-        select
-          *,
-          embeddings_cosine("{column}", unhex(:vector)) as _similarity
-        from "{table}"
-        where "{column}" is not null
-        order by _similarity desc
-        """.format(
-            column=embedding_column, table=table
+        db = datasette.get_database(database)
+        pk_join = " and ".join(
+            [
+                f"{table}.{column} = _embeddings_{table}.{column}"
+                for column in await db.primary_keys(table)
+            ]
         )
+
+        # Redirect to the SQL query against the table
+        sql = textwrap.dedent(
+            """
+        select
+          "{table}".*,
+          embeddings_cosine("_embeddings_{table}"."{column}", unhex(:vector)) as _similarity
+        from "{table}" join "_embeddings_{table}"
+        on {pk_join}
+        where "_embeddings_{table}"."{column}" is not null
+        order by _similarity desc
+        """
+        ).format(column=column_name, table=table, pk_join=pk_join)
         return Response.redirect(
             datasette.urls.database(database)
             + "?"
@@ -134,10 +147,10 @@ def table_actions(datasette, database, table):
         pass
 
     async def inner():
-        embedding_column, _ = await embedding_column_for_table(
+        embedding_columns = await embedding_columns_for_table(
             datasette, database, table
         )
-        if embedding_column and has_api_key:
+        if embedding_columns and has_api_key:
             return [
                 {
                     "href": datasette.urls.table(database, table)

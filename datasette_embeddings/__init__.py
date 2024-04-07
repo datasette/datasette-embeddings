@@ -88,10 +88,12 @@ async def embeddings_semantic_search(datasette, request):
 
     return Response.html(
         await datasette.render_template(
-            "embeddings_semantic_search.html", {
+            "embeddings_semantic_search.html",
+            {
                 "table": table,
                 "database": database,
-            }, request=request
+            },
+            request=request,
         )
     )
 
@@ -221,16 +223,32 @@ class EmbeddingsEnrichment(Enrichment):
         return ConfigForm if api_key else ConfigFormWithKey
 
     async def initialize(self, datasette, db, table, config):
-        # Ensure the embeddings column exists
+        # Ensure the shadow table with embeddings column exists
         model = config["model"]
         column_name = f"emb_{model.replace('-', '_')}"
+        shadow_table = "_embeddings_{}".format(table)
 
-        def add_column_if_not_exists(conn):
-            db = sqlite_utils.Database(conn)
-            if column_name not in db[table].columns_dict:
-                db[table].add_column(column_name, "BLOB")
+        if not await db.table_exists(shadow_table):
 
-        await db.execute_write_fn(add_column_if_not_exists)
+            def create_shadow_table(conn):
+                db = sqlite_utils.Database(conn)
+                pks = db[table].pks
+                types = db[table].columns_dict
+                pks_with_types = {pk: types.get(pk) or int for pk in pks}
+                db[shadow_table].create(
+                    dict(pks_with_types, **{column_name: bytes}), pk=pks
+                )
+
+            await db.execute_write_fn(create_shadow_table)
+
+        else:
+
+            def add_column_if_not_exists(conn):
+                db = sqlite_utils.Database(conn)
+                if column_name not in db[table].columns_dict:
+                    db[table].add_column(column_name, "BLOB")
+
+            await db.execute_write_fn(add_column_if_not_exists)
 
     @classmethod
     async def calculate_embedding(cls, api_key, text, model):
@@ -287,9 +305,14 @@ class EmbeddingsEnrichment(Enrichment):
                 )
             embedding = await self.calculate_embedding(api_key, text, model)
             encoded_embedding = self.encode_embedding(embedding)
+            shadow_table = f"_embeddings_{table}"
+            combined_columns = pks + [column_name]
+            columns = ", ".join(f'"{name}"' for name in combined_columns)
+            placeholders = ", ".join("?" for _ in combined_columns)
+            sql = f'INSERT OR REPLACE INTO "{shadow_table}" ({columns}) VALUES ({placeholders})'
             await db.execute_write(
-                f"UPDATE [{table}] SET [{column_name}] = ? WHERE { ' AND '.join([f'[{pk}] = ?' for pk in pks]) }",
-                [encoded_embedding] + [row[pk] for pk in pks],
+                sql,
+                [row[pk] for pk in pks] + [encoded_embedding],
             )
 
 

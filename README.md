@@ -19,7 +19,9 @@ Adds an [enrichment](https://enrichments.datasette.io/) for calculating and stor
 
 Users get to select the embedding model and the template (e.g. `{{ title }} {{ body }}`) for the columns they would like to embed.
 
-Embeddings are stored as binary values in a new column that matches the name of the embedding model, for example `emb_text_embedding_3_large_256` for the `text-embedding-3-large-256` model.
+Embeddings are stored as binary values in columns in a new table called `_embeddings_NAME`, where `NAME` is the name of the original source table.
+
+The vectors are stored in columns that match the name of the embedding model, for example `emb_text_embedding_3_large_256` for the `text-embedding-3-large-256` model.
 
 If you do not configure an OpenAI API key users will be asked for one any time they run the enrichment.
 
@@ -32,6 +34,8 @@ plugins:
       $env: OPENAI_API_KEY
 ```
 Then set the `OPENAI_API_KEY` environment variable before you start Datasette.
+
+This plugin adds a "Semantic search against this table" table action item for tables with embeddings, but only if the API key environment variable has been configured as the key is needed to calculate embeddings for the user's search query.
 
 ## Development
 

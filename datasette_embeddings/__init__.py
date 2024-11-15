@@ -355,3 +355,17 @@ def resolve_api_key(datasette, config=None):
     if api_key_name not in stashed_keys:
         raise ApiKeyError("No API key found in stash for {}".format(api_key_name))
     return stashed_keys[api_key_name]
+
+
+@hookimpl
+def register_magic_parameters(datasette):
+    api_key = resolve_api_key(datasette, {})
+
+    async def openai_embed_default(key, request):
+        q = request.args.get(key)
+        vector = await EmbeddingsEnrichment.calculate_embedding(api_key, q, DEFAULT_MODEL)
+        return EmbeddingsEnrichment.encode_embedding(vector)
+
+    return [
+        ("openaiembeddefault", openai_embed_default),
+    ]
